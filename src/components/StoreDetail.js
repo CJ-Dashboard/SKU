@@ -201,9 +201,9 @@ const StoreDetail = ({ store, skus, subCategories }) => {
                     {sku.category && (  
                       <span className="cat-tag">{sku.category}</span>  
                     )}  
-                    {sku.subCat && (  
-                      <span className="sub-cat-tag">{sku.subCat}</span>  
-                    )}  
+                    {sku.subCat && sku.subCat !== '제주외' && (  
+  <span className="sub-cat-tag">{sku.subCat}</span>  
+)}  
                     {sku.code && (  
                       <span className="code-tag">{sku.code}</span>  
                     )}  
