@@ -85,7 +85,12 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
   const jejuRow = findJejuRow(raw2d, headerRowIdx);  
   
   // ① SKU 목록 + 제주외 여부 태깅  
-  const skus = skuCols.map((col, localIdx) => ({  
+  const skus = skuCols.map((col, localIdx) => {  
+  const rawSubCat = String(subCatRow[col] || '').trim();  
+  // ✅ "제주외"를 "신선"으로 변환  
+  const subCat = rawSubCat === '제주외' ? '신선' : rawSubCat;  
+  
+  return {  
     idx:          idxOffset + localIdx,  
     col,  
     sheet:        sheetName,  
@@ -93,11 +98,11 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
     brand:        String(brandRow[col] || '').trim(),  
     category:     String(catRow[col] || '').trim(),  
     name:         String(nameRow[col] || '').trim(),  
-    subCat:       String(subCatRow[col] || '').trim(),  
+    subCat,       // ✅ 변환된 값 사용  
     code:         String(codeRow[col] || '').trim(),  
-    // ✅ 제주외 여부: Row3 = '제외'이면 제주 지점에서 제외  
     jejuExcluded: String(jejuRow[col] || '').trim() === '제외',  
-  }));  
+  };  
+});   
   
   // ② 시트 내 카테고리 목록 자동 추출  
   const subCategories = [...new Set(skus.map((s) => s.category).filter(Boolean))].sort();  
