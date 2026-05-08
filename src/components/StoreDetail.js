@@ -10,42 +10,48 @@ const criterionColor = (c) => {
 const SHEET_ICONS = { '상온': '🌡️', '저온': '❄️' };  
   
 const StoreDetail = ({ store, skus, subCategories }) => {  
-  const [subCatFilter,  setSubCatFilter] = useState('전체');  
-  const [critFilter,    setCritFilter] = useState('전체');  
-  const [statusFilter,  setStatusFilter] = useState('전체');  
-  const [skuSearch,     setSkuSearch] = useState('');  
+  const [subCatFilter,   setSubCatFilter] = useState('전체');  
+  const [critFilter,     setCritFilter] = useState('전체');  
+  const [statusFilter,   setStatusFilter] = useState('전체');  
+  const [skuSearch,      setSkuSearch] = useState('');  
   
-  // 전체 필수SKU (시트 + 등급 기준)  
+  // 전체 필수SKU  
   const allDetail = getStoreSkuDetail(store, skus, '전체');  
+  
   // 카테고리 필터 적용된 목록  
   const catDetail = getStoreSkuDetail(store, skus, subCatFilter);  
   
   // 해당 등급에 실제 존재하는 criterion만 (동적)  
   const activeCriteria = [...new Set(allDetail.map((d) => d.criterion))]  
-    .sort((a, b) => CRITERION_ORDER.indexOf(a) - CRITERION_ORDER.indexOf(b));  
+    .sort((a, b) =>  
+      CRITERION_ORDER.indexOf(a) - CRITERION_ORDER.indexOf(b)  
+    );  
   
   // 최종 필터 적용  
   const filtered = catDetail.filter((d) => {  
-    if (critFilter !== '전체' && d.criterion !== critFilter)     return false;  
-    if (statusFilter === '취급'   && !d.handled)                   return false;  
-    if (statusFilter === '미취급' &&  d.handled)                   return false;  
-    if (skuSearch && !d.name.includes(skuSearch) &&  
-                     !d.brand.includes(skuSearch))                 return false;  
+    if (critFilter !== '전체' && d.criterion !== critFilter) return false;  
+    if (statusFilter === '취급'   && !d.handled)               return false;  
+    if (statusFilter === '미취급' &&  d.handled)               return false;  
+    if (skuSearch &&  
+        !d.name.includes(skuSearch) &&  
+        !d.brand.includes(skuSearch))                          return false;  
     return true;  
   });  
   
   const handledAll = allDetail.filter((d) => d.handled).length;  
   const totalAll = allDetail.length;  
   
-  // 서브카테고리별 취급 현황 (동적 - 시트마다 달라짐)  
-  const subCatSummary = subCategories.map((cat) => {  
-    const catSkus = getStoreSkuDetail(store, skus, cat);  
-    const catHandled = catSkus.filter((d) => d.handled).length;  
-    const catTotal = catSkus.length;  
-    const catRate = store.catRates?.[cat] ??  
-      (catTotal > 0 ? Math.round(catHandled / catTotal * 1000) / 10 : 0);  
-    return { cat, handled: catHandled, total: catTotal, rate: catRate };  
-  });  
+  // ✅ 제주외 제거된 subCategories 기반으로 카테고리별 요약  
+  const subCatSummary = subCategories  
+    .filter((cat) => cat !== '제주외')  
+    .map((cat) => {  
+      const catSkus = getStoreSkuDetail(store, skus, cat);  
+      const catHandled = catSkus.filter((d) => d.handled).length;  
+      const catTotal = catSkus.length;  
+      const catRate = store.catRates?.[cat] ??  
+        (catTotal > 0 ? Math.round(catHandled / catTotal * 1000) / 10 : 0);  
+      return { cat, handled: catHandled, total: catTotal, rate: catRate };  
+    });  
   
   return (  
     <div className="dashboard">  
@@ -68,7 +74,19 @@ const StoreDetail = ({ store, skus, subCategories }) => {
           </div>  
           <div>  
             <span className="info-label">지점</span>  
-            <span className="info-val">{store.branch}</span>  
+            <span className="info-val">  
+              {store.branch}  
+              {/* ✅ 제주 지점 표시 */}  
+              {store.isJeju && (  
+                <span style={{  
+                  fontSize: 10, fontWeight: 700,  
+                  background: '#E3F2FD', color: '#1565C0',  
+                  padding: '1px 6px', borderRadius: 6, marginLeft: 5,  
+                }}>  
+                  🏝️ 제주  
+                </span>  
+              )}  
+            </span>  
           </div>  
         </div>  
   
@@ -94,7 +112,7 @@ const StoreDetail = ({ store, skus, subCategories }) => {
           </div>  
         </div>  
   
-        {/* 서브카테고리별 취급률 (동적 - 클릭으로 필터) */}  
+        {/* 카테고리별 취급률 (동적) */}  
         {subCatSummary.length > 1 && (  
           <div className="cat-summary-row">  
             {subCatSummary.map(({ cat, handled, total, rate }) => (  
@@ -118,10 +136,10 @@ const StoreDetail = ({ store, skus, subCategories }) => {
   
       {/* 필터 */}  
       <div className="card filter-bar">  
-        {/* 서브카테고리 탭 (동적) */}  
-        {subCategories.length > 1 && (  
+        {/* 서브카테고리 탭 (제주외 제거됨) */}  
+        {subCategories.filter((c) => c !== '제주외').length > 1 && (  
           <div className="chip-row">  
-            {['전체', ...subCategories].map((c) => (  
+            {['전체', ...subCategories.filter((c) => c !== '제주외')].map((c) => (  
               <button  
                 key={c}  
                 className={`chip ${subCatFilter === c ? 'chip-active' : ''}`}  
@@ -132,7 +150,7 @@ const StoreDetail = ({ store, skus, subCategories }) => {
           </div>  
         )}  
   
-        {/* 기준 필터 (동적) */}  
+        {/* 기준 필터 */}  
         <div className="chip-row" style={{ marginTop: 8 }}>  
           {['전체', ...activeCriteria].map((c) => (  
             <button  
@@ -153,7 +171,7 @@ const StoreDetail = ({ store, skus, subCategories }) => {
               style={statusFilter === v ? {  
                 background:  
                   v === '미취급' ? '#D32F2F' :  
-                  v === '취급'   ? '#388E3C' : '#1565C0'  
+                  v === '취급'   ? '#388E3C' : '#1565C0',  
               } : {}}  
               onClick={() => setStatusFilter(v)}  
             >{v}</button>  
@@ -178,6 +196,16 @@ const StoreDetail = ({ store, skus, subCategories }) => {
           {subCatFilter !== '전체' && (  
             <span className="cat-badge">{subCatFilter}</span>  
           )}  
+          {/* ✅ 제주 지점 안내 */}  
+          {store.isJeju && (  
+            <span style={{  
+              fontSize: 11, fontWeight: 600,  
+              background: '#E3F2FD', color: '#1565C0',  
+              padding: '2px 8px', borderRadius: 8, marginLeft: 6,  
+            }}>  
+              🏝️ 제주외 SKU 제외됨  
+            </span>  
+          )}  
         </h2>  
         <div className="sku-list">  
           {filtered.length === 0 && (  
@@ -188,24 +216,26 @@ const StoreDetail = ({ store, skus, subCategories }) => {
               <div className="sku-left">  
                 <span className="sku-status">{sku.handled ? '✅' : '❌'}</span>  
                 <div>  
+                  {/* ✅ 자재코드 앞에 표시 */}  
                   <div className="sku-name">  
-  {sku.code && (  
-    <span className="sku-code-inline">{sku.code} / </span>  
-  )}  
-  {sku.brand ? `[${sku.brand}] ` : ''}{sku.name}  
-</div>   
+                    {sku.code && (  
+                      <span className="sku-code-inline">{sku.code} / </span>  
+                    )}  
+                    {sku.brand ? `[${sku.brand}] ` : ''}{sku.name}  
+                  </div>  
                   <div style={{ display: 'flex', gap: 5, marginTop: 3, flexWrap: 'wrap' }}>  
-                    <span className="criterion-badge" style={{ color: criterionColor(sku.criterion) }}>  
+                    <span  
+                      className="criterion-badge"  
+                      style={{ color: criterionColor(sku.criterion) }}  
+                    >  
                       {sku.criterion}  
                     </span>  
-                    {sku.category && (  
+                    {/* ✅ 제주외 완전 제거 - category/subCat 표시 */}  
+                    {sku.category && sku.category !== '제주외' && (  
                       <span className="cat-tag">{sku.category}</span>  
                     )}  
                     {sku.subCat && sku.subCat !== '제주외' && (  
-  <span className="sub-cat-tag">{sku.subCat}</span>  
-)}  
-                    {sku.code && (  
-                      <span className="code-tag">{sku.code}</span>  
+                      <span className="sub-cat-tag">{sku.subCat}</span>  
                     )}  
                   </div>  
                 </div>  

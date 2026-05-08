@@ -1,8 +1,8 @@
 /**  
  * ✅ 완전 동적 멀티시트 파서  
  * - RAW col12(가동SKU) / col40(필수SKU) 직접 사용  
- * - 제주 지점: Row3='제외' SKU 자동 제외 후 재계산  
- * - 비제주 지점: 모든 SKU 등급 기준 적용  
+ * - 제주 지점: 제주외 SKU 자동 제외 후 재계산  
+ * - 제주외 → 신선 전체 변환  
  */  
   
 const GRADE_CRITERIA = {  
@@ -50,9 +50,8 @@ const findSkuCols = (headerRow) =>
     return acc;  
   }, []);  
   
-// ── 제주외 여부 확인 (headerRowIdx - 14 = Row3) ───────────────────  
+// ── 제주외 여부 확인 행 (headerRowIdx - 14) ───────────────────────  
 const findJejuRow = (raw2d, headerRowIdx) => {  
-  // Row3 = 포함/제외 행 (headerRowIdx - 14)  
   const jejuRowIdx = headerRowIdx - 14;  
   return jejuRowIdx >= 0 ? (raw2d[jejuRowIdx] || []) : [];  
 };  
@@ -60,6 +59,12 @@ const findJejuRow = (raw2d, headerRowIdx) => {
 // ── 제주 지점 여부 확인 ────────────────────────────────────────────  
 const isJejuBranch = (branch) =>  
   String(branch || '').trim().includes('제주');  
+  
+// ✅ 제주외 → 신선 변환 함수  
+const convertJejuLabel = (val) => {  
+  const v = String(val || '').trim();  
+  return v === '제주외' ? '신선' : v;  
+};  
   
 // ── 단일 시트 파서 ────────────────────────────────────────────────  
 export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {  
@@ -80,32 +85,30 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
   const nameRow = raw2d[headerRowIdx - 3] || [];  
   const subCatRow = raw2d[headerRowIdx - 2] || [];  
   const codeRow = raw2d[headerRowIdx - 1] || [];  
-  
-  // ✅ 제주외 행 (Row3 = headerRowIdx - 14)  
   const jejuRow = findJejuRow(raw2d, headerRowIdx);  
   
-  // ① SKU 목록 + 제주외 여부 태깅  
-  const skus = skuCols.map((col, localIdx) => {  
-  const rawSubCat = String(subCatRow[col] || '').trim();  
-  // ✅ "제주외"를 "신선"으로 변환  
-  const subCat = rawSubCat === '제주외' ? '신선' : rawSubCat;  
-  
-  return {  
+  // ① SKU 목록 + 제주외 → 신선 변환 + 제주외 여부 태깅  
+  const skus = skuCols.map((col, localIdx) => ({  
     idx:          idxOffset + localIdx,  
     col,  
     sheet:        sheetName,  
     criterion:    String(headerRow[col] || '').trim(),  
     brand:        String(brandRow[col] || '').trim(),  
-    category:     String(catRow[col] || '').trim(),  
+    // ✅ category/subCat 모두 제주외 → 신선 변환  
+    category:     convertJejuLabel(catRow[col]),  
     name:         String(nameRow[col] || '').trim(),  
-    subCat,       // ✅ 변환된 값 사용  
+    subCat:       convertJejuLabel(subCatRow[col]),  
     code:         String(codeRow[col] || '').trim(),  
+    // ✅ 제주외 여부: 제주 지점 취급률 계산 시 제외용  
     jejuExcluded: String(jejuRow[col] || '').trim() === '제외',  
-  };  
-});   
+  }));  
   
-  // ② 시트 내 카테고리 목록 자동 추출  
-  const subCategories = [...new Set(skus.map((s) => s.category).filter(Boolean))].sort();  
+  // ② 시트 내 카테고리 목록 자동 추출 (제주외 완전 제거)  
+  const subCategories = [...new Set(  
+    skus  
+      .map((s) => s.category)  
+      .filter((c) => Boolean(c) && c !== '제주외')  
+  )].sort();  
   
   // ③ col12(가동SKU), col40(필수SKU) 위치 자동 탐지  
   let col12Idx = 12;  
@@ -131,7 +134,7 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
     const dealer = String(row[colMap.DEALER] ?? '').trim();  
     const asa = String(row[colMap.ASA] ?? '').trim();  
     const branch = String(row[colMap.BRANCH] ?? '').trim();  
-    const jeju = isJejuBranch(branch); // ✅ 제주 지점 여부  
+    const jeju = isJejuBranch(branch);  
   
     // SKU 취급 데이터  
     const handling = {};  
@@ -151,7 +154,9 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
       // ── 비제주 지점: RAW col12/col40 직접 사용 ──────────────────  
       const rawActive = parseInt(row[col12Idx] ?? 0) || 0;  
       const rawRequired = parseInt(row[col40Idx] ?? 0) || 0;  
-      rate = rawRequired > 0 ? Math.round(rawActive / rawRequired * 1000) / 10 : 0;  
+      rate = rawRequired > 0  
+        ? Math.round(rawActive / rawRequired * 1000) / 10  
+        : 0;  
       handledTotal = rawActive;  
       requiredTotal = rawRequired;  
     } else {  
@@ -173,16 +178,18 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
       requiredTotal = applicable.length;  
     }  
   
-    // ✅ 카테고리별 취급률 계산 (제주외 반영)  
+    // ✅ 카테고리별 취급률 계산 (제주 반영)  
     const requiredCriteriaForCat = GRADE_CRITERIA[grade] || [];  
     const catRates = {};  
     subCategories.forEach((cat) => {  
       const catReq = skus.filter((s) =>  
         requiredCriteriaForCat.includes(s.criterion) &&  
         s.category === cat &&  
-        (!jeju || !s.jejuExcluded) // ✅ 제주면 제주외 제외  
+        (!jeju || !s.jejuExcluded)  // ✅ 제주면 제주외 제외  
       );  
-      const catApp = catReq.filter((s) => handling[s.idx] === 0 || handling[s.idx] === 1);  
+      const catApp = catReq.filter((s) =>  
+        handling[s.idx] === 0 || handling[s.idx] === 1  
+      );  
       const catHand = catApp.filter((s) => handling[s.idx] === 1);  
       catRates[cat] = catApp.length > 0  
         ? Math.round(catHand.length / catApp.length * 1000) / 10  
@@ -201,7 +208,7 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
       storeCode: String(row[colMap.STORE_CODE] ?? '').trim(),  
       name:      storeName,  
       asa,  
-      isJeju:    jeju, // ✅ 제주 여부 저장  
+      isJeju:    jeju,  
       rate,  
       catRates,  
       handling,  
@@ -236,10 +243,9 @@ export const getStoreSkuDetail = (store, skus, subCatFilter = '전체') => {
   const requiredCriteria = GRADE_CRITERIA[store.grade] || [];  
   return skus  
     .filter((sku) => {  
-      if (sku.sheet !== store.sheet)                return false;  
-      if (!requiredCriteria.includes(sku.criterion)) return false;  
-      // ✅ 제주 지점이면 제주외 SKU 제외  
-      if (store.isJeju && sku.jejuExcluded)         return false;  
+      if (sku.sheet !== store.sheet)                         return false;  
+      if (!requiredCriteria.includes(sku.criterion))         return false;  
+      if (store.isJeju && sku.jejuExcluded)                  return false;  
       if (subCatFilter !== '전체' && sku.category !== subCatFilter) return false;  
       return true;  
     })  
@@ -247,12 +253,11 @@ export const getStoreSkuDetail = (store, skus, subCatFilter = '전체') => {
       const val = store.handling[sku.idx];  
       return {  
         ...sku,  
-        value:        val,  
-        handled:      val === 1,  
-        notHandled:   val === 0,  
-        gradeOut:     val === 3,  
-        excluded:     val === 'X',  
-        jejuExcluded: sku.jejuExcluded,  
+        value:      val,  
+        handled:    val === 1,  
+        notHandled: val === 0,  
+        gradeOut:   val === 3,  
+        excluded:   val === 'X',  
       };  
     });  
 };  
