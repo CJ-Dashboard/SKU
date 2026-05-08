@@ -1,8 +1,7 @@
 /**  
- * ✅ 완전 동적 멀티시트 파서  
- * - 시트명 자동 인식 (상온/저온/추가 시트 모두 지원)  
- * - SKU/대리점/ASA 유동적 증감 자동 반영  
- * - 헤더행 자동 탐지 (하드코딩 없음)  
+ * ✅ RAW 파일의 col12(가동SKU) / col40(필수SKU) 직접 사용  
+ * - 취급률 계산: col12 / col40 (RAW와 정확히 동일)  
+ * - 제외 항목 자동 처리  
  */  
   
 const GRADE_CRITERIA = {  
@@ -64,11 +63,11 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
     throw new Error(`[${sheetName}] SKU 기준(S+/) 컬럼을 찾을 수 없습니다.`);  
   
   // 헤더 기준 상대 offset으로 메타데이터 추출  
-  const brandRow = raw2d[headerRowIdx - 5] || []; // 브랜드명 (햇반 등)  
-  const catRow = raw2d[headerRowIdx - 4] || []; // 카테고리 (식품/장류)  
-  const nameRow = raw2d[headerRowIdx - 3] || []; // SKU명  
-  const subCatRow = raw2d[headerRowIdx - 2] || []; // 묶음형태 (개별/묶음)  
-  const codeRow = raw2d[headerRowIdx - 1] || []; // SKU 코드  
+  const brandRow = raw2d[headerRowIdx - 5] || [];  
+  const catRow = raw2d[headerRowIdx - 4] || [];  
+  const nameRow = raw2d[headerRowIdx - 3] || [];  
+  const subCatRow = raw2d[headerRowIdx - 2] || [];  
+  const codeRow = raw2d[headerRowIdx - 1] || [];  
   
   // ① SKU 목록 (전역 고유 idx)  
   const skus = skuCols.map((col, localIdx) => ({  
@@ -83,12 +82,23 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
     code:      String(codeRow[col] || '').trim(),  
   }));  
   
-  // ② 시트 내 카테고리 목록 자동 추출 (식품/장류 등)  
+  // ② 시트 내 카테고리 목록 자동 추출  
   const subCategories = [...new Set(skus.map((s) => s.category).filter(Boolean))].sort();  
   
   // ③ 점포 데이터 추출  
   const VALID_GRADES = new Set(Object.keys(GRADE_CRITERIA));  
   const stores = [];  
+  
+  // ✅ col12 = 가동SKU, col40 = 필수SKU 찾기  
+  let col12Idx = 12;  // 기본값  
+  let col40Idx = 40;  // 기본값  
+  
+  // 혹시 RAW 구조가 다르면 자동으로 찾기  
+  headerRow.forEach((cell, idx) => {  
+    const v = String(cell || '').trim().toUpperCase();  
+    if (v.includes('가동')) col12Idx = idx;  
+    if (v.includes('필수')) col40Idx = idx;  
+  });  
   
   for (let r = headerRowIdx + 1; r < raw2d.length; r++) {  
     const row = raw2d[r];  
@@ -101,7 +111,7 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
     const dealer = String(row[colMap.DEALER] ?? '').trim();  
     const asa = String(row[colMap.ASA] ?? '').trim();  
   
-    // SKU 취급 데이터 파싱  
+    // SKU 취급 데이터  
     const handling = {};  
     skus.forEach((sku) => {  
       const v = row[sku.col];  
@@ -112,16 +122,18 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
         String(v ?? '').trim() === '제외' ? 'X' : null;  
     });  
   
-    // 전체 취급률 계산  
-    const requiredCriteria = GRADE_CRITERIA[grade] || [];  
-    const requiredSkus = skus.filter((s) => requiredCriteria.includes(s.criterion));  
-    const applicable = requiredSkus.filter((s) => handling[s.idx] === 0 || handling[s.idx] === 1);  
-    const handled = applicable.filter((s) => handling[s.idx] === 1);  
-    const rate = applicable.length > 0  
-      ? Math.round((handled.length / applicable.length) * 1000) / 10  
+    // ✅ RAW col12 / col40 직접 사용해서 취급률 계산  
+    const rawActiveSku = parseInt(row[col12Idx] || 0);  
+    const rawRequiredSku = parseInt(row[col40Idx] || 0);  
+  
+    // ✅ RAW 기준 (col12 / col40)  
+    const rate = (rawRequiredSku > 0)  
+      ? Math.round(rawActiveSku / rawRequiredSku * 1000) / 10  
       : 0;  
   
-    // 카테고리별 취급률 계산 (식품/장류 등)  
+    // 카테고리별 취급률도 계산  
+    const requiredCriteria = GRADE_CRITERIA[grade] || [];  
+    const requiredSkus = skus.filter((s) => requiredCriteria.includes(s.criterion));  
     const catRates = {};  
     subCategories.forEach((cat) => {  
       const catReq = requiredSkus.filter((s) => s.category === cat);  
@@ -144,18 +156,18 @@ export const parseSheet = (raw2d, sheetName, idxOffset = 0) => {
       storeCode: String(row[colMap.STORE_CODE] ?? '').trim(),  
       name:      storeName,  
       asa,  
-      rate,  
+      rate,                    // ✅ RAW 기준 취급률  
       catRates,  
       handling,  
-      requiredTotal: applicable.length,  
-      handledTotal:  handled.length,  
+      handledTotal:  rawActiveSku,      // ✅ col12 (가동SKU)  
+      requiredTotal: rawRequiredSku,    // ✅ col40 (필수SKU)  
     });  
   }  
   
   return { stores, skus, subCategories };  
 };  
   
-// ── 유틸 함수 ─────────────────────────────────────────────────────  
+// ── 유틸 함수 ──────────────────────────────────────────────────  
   
 export const getUnique = (arr) =>  
   [...new Set(arr.filter(Boolean))].sort();  
@@ -173,7 +185,6 @@ export const applyFilters = (stores, { sheet, dealer, asa, grade, search }) =>
     return true;  
   });  
   
-// 점포 SKU 상세 (해당 시트 + 등급 필수기준 + 카테고리 필터)  
 export const getStoreSkuDetail = (store, skus, subCatFilter = '전체') => {  
   const requiredCriteria = GRADE_CRITERIA[store.grade] || [];  
   return skus  

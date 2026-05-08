@@ -11,7 +11,7 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
   const [sheetFilter, setSheetFilter] = useState('전체');  
   const [gradeFilter, setGradeFilter] = useState('전체');  
   const [search, setSearch] = useState('');  
-  const [sortBy, setSortBy] = useState('rate_asc'); // rate_asc, rate_desc, name  
+  const [sortBy, setSortBy] = useState('rate_asc');  
   
   // 해당 ASA 점포만 필터  
   const myStores = stores.filter((s) => s.dealer === dealer && s.asa === asa);  
@@ -177,6 +177,7 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
                   <div className="store-rate" style={{ color: rateColor(store.rate) }}>  
                     {store.rate}%  
                   </div>  
+                  {/* ✅ RAW 기준 가동SKU / 필수SKU 표시 */}  
                   <div className="store-rate-sub">  
                     {store.handledTotal}/{store.requiredTotal}  
                   </div>  
