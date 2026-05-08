@@ -1,42 +1,21 @@
 import React, { useState } from 'react';  
-import { getUnique } from '../utils/dataProcessor';  
   
 const SHEET_ICONS = { '상온': '🌡️', '저온': '❄️' };  
+const rateColor = (r) => (r >= 80 ? '#388E3C' : r >= 60 ? '#F57C00' : '#D32F2F');  
   
-const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) => {  
-  const [dealer, setDealer] = useState('');  
-  const [asa, setAsa] = useState('');  
+const SelectionScreen = ({ meta, onConfirm, isLoading, error }) => {  
+  const [dealer,       setDealer] = useState('');  
+  const [asa,          setAsa] = useState('');  
   const [dealerSearch, setDealerSearch] = useState('');  
   
-  // 대리점 목록 (검색 포함)  
-  const dealerList = getUnique(stores.map((s) => s.dealer));  
+  const dealerList = meta.dealers.map((d) => d.dealer);  
   const filteredDealerList = dealerSearch  
     ? dealerList.filter((d) => d.includes(dealerSearch))  
     : dealerList;  
   
-  // 선택된 대리점에 해당하는 ASA 목록  
-  const asaList = dealer  
-    ? getUnique(stores.filter((s) => s.dealer === dealer).map((s) => s.asa))  
-    : [];  
-  
-  // 선택된 ASA의 점포 수 미리보기  
-  const previewStores = dealer && asa  
-    ? stores.filter((s) => s.dealer === dealer && s.asa === asa)  
-    : [];  
-  
-  const avgRate = previewStores.length  
-    ? Math.round(previewStores.reduce((s, d) => s + d.rate, 0) / previewStores.length * 10) / 10  
-    : 0;  
-  
-  const rateColor = (r) => (r >= 80 ? '#388E3C' : r >= 60 ? '#F57C00' : '#D32F2F');  
-  
-  // 시트별 점포 수  
-  const sheetCounts = {};  
-  previewStores.forEach((s) => {  
-    sheetCounts[s.sheet] = (sheetCounts[s.sheet] || 0) + 1;  
-  });  
-  
-  const canConfirm = dealer && asa;  
+  const selectedDealerData = meta.dealers.find((d) => d.dealer === dealer);  
+  const asaList = selectedDealerData?.asas || [];  
+  const selectedAsaData = asaList.find((a) => a.asa === asa);  
   
   const handleDealerSelect = (d) => {  
     setDealer(d);  
@@ -44,18 +23,38 @@ const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) 
     setDealerSearch('');  
   };  
   
+  const handleConfirm = () => {  
+    if (!dealer || !asa || !selectedAsaData) return;  
+    // ✅ 해당 ASA의 시트별 fileName 전달  
+    const sheetFiles = selectedAsaData.sheets.map((s) => ({  
+      sheet:    s.sheet,  
+      fileName: s.fileName,  
+    }));  
+    onConfirm(dealer, asa, sheetFiles);  
+  };  
+  
+  const canConfirm = dealer && asa && !isLoading;  
+  
   return (  
     <div className="selection-screen">  
-      {parseError && <div className="error-box">{parseError}</div>}  
-{lastUpdate && (  
-  <div className="update-banner">  
-    <span className="update-banner-icon">📅</span>  
-    <div>  
-      <div className="update-banner-date">{lastUpdate.date} 업데이트</div>  
-      <div className="update-banner-version">{lastUpdate.version} · {lastUpdate.updatedBy}</div>  
-    </div>  
-  </div>  
-)}  
+  
+      {/* 업데이트 배너 */}  
+      {meta.lastUpdate && (  
+        <div className="update-banner">  
+          <span className="update-banner-icon">📅</span>  
+          <div>  
+            <div className="update-banner-date">  
+              {meta.lastUpdate.date} 업데이트  
+            </div>  
+            <div className="update-banner-version">  
+              {meta.lastUpdate.version} · {meta.lastUpdate.updatedBy}  
+            </div>  
+          </div>  
+        </div>  
+      )}  
+  
+      {error && <div className="error-box">⚠️ {error}</div>}  
+  
       <div className="selection-hero">  
         <span className="selection-emoji">👋</span>  
         <h2>안녕하세요!</h2>  
@@ -68,8 +67,6 @@ const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) 
           <span className="step-num">1</span>  
           <span>대리점 선택</span>  
         </div>  
-  
-        {/* 대리점 검색 */}  
         <div className="dealer-search-wrap">  
           <input  
             className="dealer-search-input"  
@@ -79,68 +76,78 @@ const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) 
             onChange={(e) => { setDealerSearch(e.target.value); setDealer(''); setAsa(''); }}  
           />  
         </div>  
-  
-        {/* 대리점 목록 */}  
         <div className="dealer-list">  
           {filteredDealerList.length === 0 && (  
             <p className="empty-msg" style={{ padding: '16px 0' }}>검색 결과 없음</p>  
           )}  
-          {filteredDealerList.map((d) => (  
-            <button  
-              key={d}  
-              className={`dealer-item ${dealer === d ? 'dealer-item-active' : ''}`}  
-              onClick={() => handleDealerSelect(d)}  
-            >  
-              <span className="dealer-item-name">🏢 {d}</span>  
-              <span className="dealer-item-count">  
-                {getUnique(stores.filter((s) => s.dealer === d).map((s) => s.asa)).length}명  
-              </span>  
-            </button>  
-          ))}  
+          {filteredDealerList.map((d) => {  
+            const dData = meta.dealers.find((x) => x.dealer === d);  
+            return (  
+              <button  
+                key={d}  
+                className={`dealer-item ${dealer === d ? 'dealer-item-active' : ''}`}  
+                onClick={() => handleDealerSelect(d)}  
+              >  
+                <span className="dealer-item-name">🏢 {d}</span>  
+                <span className="dealer-item-count">  
+                  {dData?.asas.length || 0}명  
+                </span>  
+              </button>  
+            );  
+          })}  
         </div>  
       </div>  
   
-      {/* STEP 2: ASA 선택 (대리점 선택 후 활성화) */}  
+      {/* STEP 2: ASA 선택 */}  
       <div className={`selection-card ${!dealer ? 'card-disabled' : ''}`}>  
         <div className="step-label">  
           <span className={`step-num ${!dealer ? 'step-num-disabled' : ''}`}>2</span>  
-          <span>ASA 선택 {dealer && <span className="step-sub">— {dealer}</span>}</span>  
+          <span>  
+            ASA 선택  
+            {dealer && <span className="step-sub">— {dealer}</span>}  
+          </span>  
         </div>  
-  
         {!dealer ? (  
           <p className="disabled-hint">① 먼저 대리점을 선택해 주세요</p>  
         ) : (  
           <div className="asa-list">  
-            {asaList.map((a) => {  
-              const asaStores = stores.filter((s) => s.dealer === dealer && s.asa === a);  
-              const asaAvg = asaStores.length  
-                ? Math.round(asaStores.reduce((s, d) => s + d.rate, 0) / asaStores.length * 10) / 10  
-                : 0;  
-              return (  
-                <button  
-                  key={a}  
-                  className={`asa-item ${asa === a ? 'asa-item-active' : ''}`}  
-                  onClick={() => setAsa(a)}  
-                >  
-                  <div className="asa-item-left">  
-                    <span className="asa-icon">👤</span>  
-                    <div>  
-                      <div className="asa-name">{a}</div>  
-                      <div className="asa-store-count">{asaStores.length}개 2차점</div>  
+            {asaList.map((a) => (  
+              <button  
+                key={a.asa}  
+                className={`asa-item ${asa === a.asa ? 'asa-item-active' : ''}`}  
+                onClick={() => setAsa(a.asa)}  
+              >  
+                <div className="asa-item-left">  
+                  <span className="asa-icon">👤</span>  
+                  <div>  
+                    <div className="asa-name">{a.asa}</div>  
+                    <div className="asa-store-count">  
+                      {a.totalStores}개 2차점  
+                      {/* 시트별 뱃지 */}  
+                      {a.sheets.map((s) => (  
+                        <span key={s.sheet} style={{  
+                          fontSize: 10, fontWeight: 600,  
+                          background: s.sheet === '상온' ? '#FFF3E0' : '#E3F2FD',  
+                          color:      s.sheet === '상온' ? '#E65100' : '#1565C0',  
+                          padding: '1px 5px', borderRadius: 5, marginLeft: 4,  
+                        }}>  
+                          {SHEET_ICONS[s.sheet] || '📄'} {s.sheet}  
+                        </span>  
+                      ))}  
                     </div>  
                   </div>  
-                  <div className="asa-rate" style={{ color: rateColor(asaAvg) }}>  
-                    {asaAvg}%  
-                  </div>  
-                </button>  
-              );  
-            })}  
+                </div>  
+                <div className="asa-rate" style={{ color: rateColor(a.avgRate) }}>  
+                  {a.avgRate}%  
+                </div>  
+              </button>  
+            ))}  
           </div>  
         )}  
       </div>  
   
       {/* 선택 미리보기 */}  
-      {canConfirm && (  
+      {canConfirm && selectedAsaData && (  
         <div className="preview-card">  
           <div className="preview-title">📋 선택 확인</div>  
           <div className="preview-info">  
@@ -155,18 +162,19 @@ const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) 
             <div className="preview-row">  
               <span className="preview-label">2차점 수</span>  
               <span className="preview-val">  
-                <strong style={{ color: '#1565C0' }}>{previewStores.length}개</strong>  
-                {Object.entries(sheetCounts).map(([sh, cnt]) => (  
-                  <span key={sh} className="sheet-preview-badge">  
-                    {SHEET_ICONS[sh] || '📄'}{sh} {cnt}  
+                <strong style={{ color: '#1565C0' }}>{selectedAsaData.totalStores}개</strong>  
+                {selectedAsaData.sheets.map((s) => (  
+                  <span key={s.sheet} className="sheet-preview-badge">  
+                    {SHEET_ICONS[s.sheet] || '📄'} {s.sheet} {s.storeCount}  
                   </span>  
                 ))}  
               </span>  
             </div>  
             <div className="preview-row">  
               <span className="preview-label">평균 취급률</span>  
-              <span className="preview-val" style={{ color: rateColor(avgRate), fontWeight: 700 }}>  
-                {avgRate}%  
+              <span className="preview-val"  
+                style={{ color: rateColor(selectedAsaData.avgRate), fontWeight: 700 }}>  
+                {selectedAsaData.avgRate}%  
               </span>  
             </div>  
           </div>  
@@ -177,9 +185,15 @@ const SelectionScreen = ({ stores, sheets, lastUpdate, onConfirm, parseError }) 
       <button  
         className={`confirm-btn ${canConfirm ? 'confirm-btn-active' : ''}`}  
         disabled={!canConfirm}  
-        onClick={() => onConfirm(dealer, asa)}  
+        onClick={handleConfirm}  
       >  
-        {canConfirm ? `✅ ${asa} ASA로 시작하기` : '대리점과 ASA를 선택해 주세요'}  
+        {isLoading ? (  
+          <span>⏳ 데이터 불러오는 중...</span>  
+        ) : canConfirm ? (  
+          `✅ ${asa} ASA로 시작하기`  
+        ) : (  
+          '대리점과 ASA를 선택해 주세요'  
+        )}  
       </button>  
     </div>  
   );  

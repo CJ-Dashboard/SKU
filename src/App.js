@@ -1,7 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';  
-import * as XLSX from 'xlsx';  
-import { parseSheet } from './utils/dataProcessor';  
-import FileUpload from './components/FileUpload';  
+import React, { useState, useEffect } from 'react';  
 import SelectionScreen from './components/SelectionScreen';  
 import StoreListScreen from './components/StoreListScreen';  
 import StoreDetail from './components/StoreDetail';  
@@ -9,107 +6,84 @@ import './App.css';
   
 function App() {  
   const [step, setStep] = useState('loading');  
-  const [appData, setAppData] = useState(null);  
-  const [selection, setSelection] = useState({ dealer: '', asa: '' });  
+  const [meta, setMeta] = useState(null);       // 대리점/ASA 목록  
+  const [asaData, setAsaData] = useState(null);       // 선택된 ASA 데이터  
+  const [selection, setSelection] = useState({ dealer: '', asa: '', sheet: '' });  
   const [selectedStore, setSelectedStore] = useState(null);  
-  const [isLoading, setIsLoading] = useState(false);  
-  const [parseError, setParseError] = useState('');  
-  const [lastUpdate, setLastUpdate] = useState(null);  
-  const [isAdmin, setIsAdmin] = useState(false); // 관리자 모드  
+  const [isLoadingAsa, setIsLoadingAsa] = useState(false);  
+  const [error, setError] = useState('');  
   
-  // ── 앱 시작 시 자동으로 서버 RAW 파일 로드 ──────────────────────  
- useEffect(() => {  
-  loadServerData();  
-// eslint-disable-next-line react-hooks/exhaustive-deps  
-}, []);  
-  
-  const loadServerData = async () => {  
-    setIsLoading(true);  
-    setParseError('');  
-    try {  
-      // 업데이트 날짜 로드  
-      const metaRes = await fetch(`/data/lastUpdate.json?t=${Date.now()}`);  
-      if (metaRes.ok) {  
-        const meta = await metaRes.json();  
-        setLastUpdate(meta);  
-      }  
-  
-      // RAW 파일 로드  
-      const fileRes = await fetch(`/data/필수취급raw.xlsx?t=${Date.now()}`);  
-      if (!fileRes.ok) throw new Error('데이터 파일을 찾을 수 없습니다.');  
-  
-      const buffer = await fileRes.arrayBuffer();  
-      const parsed = parseWorkbook(buffer);  
-      setAppData(parsed);  
-      setStep('select');  
-    } catch (err) {  
-      // 서버 파일 없으면 업로드 화면으로  
-      setParseError(err.message);  
-      setStep('upload');  
-    } finally {  
-      setIsLoading(false);  
-    }  
-  };  
-  
-  // ── 워크북 파싱 공통 함수 ────────────────────────────────────────  
-  const parseWorkbook = (buffer) => {  
-    const wb = XLSX.read(buffer, { type: 'array' });  
-  
-    let idxOffset = 0;  
-    const allStores = [];  
-    const allSkus = [];  
-    const sheets = [];  
-    const subCategoriesBySheet = {};  
-    const skippedSheets = [];  
-  
-    wb.SheetNames.forEach((sheetName) => {  
+  // ── 1단계: meta.json만 로드 (초소형, 빠름!) ─────────────────────  
+  useEffect(() => {  
+    const loadMeta = async () => {  
       try {  
-        const ws = wb.Sheets[sheetName];  
-        const raw2d = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });  
-        const { stores, skus, subCategories } = parseSheet(raw2d, sheetName, idxOffset);  
-        allStores.push(...stores);  
-        allSkus.push(...skus);  
-        sheets.push(sheetName);  
-        subCategoriesBySheet[sheetName] = subCategories;  
-        idxOffset += skus.length;  
-      } catch (err) {  
-        skippedSheets.push(`[${sheetName}] ${err.message}`);  
-      }  
-    });  
-  
-    if (allStores.length === 0)  
-      throw new Error(skippedSheets.length > 0  
-        ? skippedSheets.join(' / ')  
-        : '유효한 데이터를 찾을 수 없습니다.');  
-  
-    return { stores: allStores, skus: allSkus, sheets, subCategoriesBySheet };  
-  };  
-  
-  // ── 관리자 수동 업로드 (로컬 테스트용) ──────────────────────────  
-  const parseFile = useCallback((file) => {  
-    setIsLoading(true);  
-    setParseError('');  
-    const reader = new FileReader();  
-    reader.onload = (e) => {  
-      try {  
-        const parsed = parseWorkbook(e.target.result);  
-        setAppData(parsed);  
-        setSelection({ dealer: '', asa: '' });  
-        setSelectedStore(null);  
+        const res = await fetch(`/data/meta.json?t=${Date.now()}`);  
+        if (!res.ok) throw new Error('meta.json을 찾을 수 없습니다.');  
+        const data = await res.json();  
+        setMeta(data);  
         setStep('select');  
       } catch (err) {  
-        setParseError(err.message);  
-      } finally {  
-        setIsLoading(false);  
+        setError(err.message);  
+        setStep('error');  
       }  
     };  
-    reader.onerror = () => { setParseError('파일을 읽을 수 없습니다.'); setIsLoading(false); };  
-    reader.readAsArrayBuffer(file);  
+    loadMeta();  
   }, []);  
   
-  const handleSelectionConfirm = (dealer, asa) => {  
+  // ── 2단계: ASA 선택 후 해당 ASA JSON만 로드 ─────────────────────  
+  const handleSelectionConfirm = async (dealer, asa, sheetFiles) => {  
+    setIsLoadingAsa(true);  
+    setError('');  
     setSelection({ dealer, asa });  
-    setStep('storelist');  
+  
+    try {  
+      // 해당 ASA의 모든 시트 JSON 로드 (상온 + 저온 동시 로드)  
+      const results = await Promise.all(  
+        sheetFiles.map(async ({ sheet, fileName }) => {  
+          const res = await fetch(  
+            `/data/asa/${encodeURIComponent(fileName)}?t=${Date.now()}`  
+          );  
+          if (!res.ok) throw new Error(`${fileName} 로드 실패`);  
+          return res.json();  
+        })  
+      );  
+  
+      // 시트 데이터 통합  
+      let idxOffset = 0;  
+      const allStores = [];  
+      const allSkus = [];  
+      const sheets = [];  
+      const subCategoriesBySheet = {};  
+  
+      results.forEach((data) => {  
+        // SKU idx 재정렬 (시트마다 offset 적용)  
+        const skusWithOffset = data.skus.map((sku) => ({  
+          ...sku,  
+          idx: idxOffset + sku.idx,  
+        }));  
+        const storesWithOffset = data.stores.map((store) => ({  
+          ...store,  
+          handling: Object.fromEntries(  
+            Object.entries(store.handling).map(([k, v]) => [  
+              parseInt(k) + idxOffset, v  
+            ])  
+          ),  
+        }));  
+  
+        allStores.push(...storesWithOffset);  
+        allSkus.push(...skusWithOffset);  
+        sheets.push(data.sheet);  
+        subCategoriesBySheet[data.sheet] = data.subCategories;  
+        idxOffset += data.skus.length;  
+      });  
+  
+      setAsaData({ stores: allStores, skus: allSkus, sheets, subCategoriesBySheet });  
+      setStep('storelist');  
+    } catch (err) {  
+      setError(err.message);  
+    } finally {  
+      setIsLoadingAsa(false);  
+    }  
   };  
   
   const handleSelectStore = (store) => {  
@@ -118,28 +92,30 @@ function App() {
   };  
   
   const handleBack = () => {  
-    if (step === 'storedetail') setStep('storelist');  
-    else if (step === 'storelist') { setStep('select'); setSelection({ dealer: '', asa: '' }); }  
-    else if (step === 'select')   setStep('upload');  
+    if (step === 'storedetail') { setStep('storelist'); }  
+    else if (step === 'storelist') {  
+      setStep('select');  
+      setAsaData(null);  
+      setSelection({ dealer: '', asa: '', sheet: '' });  
+    }  
   };  
   
-  // ── 헤더 타이틀 ─────────────────────────────────────────────────  
+  // ── 헤더 ──────────────────────────────────────────────────────  
   const headerTitle = () => {  
     if (step === 'loading')     return '📊 필수취급 대시보드';  
-    if (step === 'upload')      return '📊 필수취급 대시보드';  
     if (step === 'select')      return '📊 필수취급 대시보드';  
     if (step === 'storelist')   return `👤 ${selection.asa}`;  
     if (step === 'storedetail') return selectedStore?.name || '';  
-    return '';  
+    return '📊 필수취급 대시보드';  
   };  
   
   const headerSub = () => {  
-    if (step === 'storedetail')  
-      return `${selectedStore?.sheet} · ${selectedStore?.dealer} · ${selectedStore?.grade}등급 · ${selectedStore?.rate}%`;  
     if (step === 'storelist')  
       return `🏢 ${selection.dealer}`;  
-    if (lastUpdate && (step === 'select' || step === 'storelist'))  
-      return `📅 ${lastUpdate.date} ${lastUpdate.version} 기준`;  
+    if (step === 'storedetail')  
+      return `${selectedStore?.sheet} · ${selectedStore?.dealer} · ${selectedStore?.grade}등급 · ${selectedStore?.rate}%`;  
+    if (meta?.lastUpdate && step === 'select')  
+      return `📅 ${meta.lastUpdate.date} ${meta.lastUpdate.version} 기준`;  
     return '';  
   };  
   
@@ -147,7 +123,7 @@ function App() {
     <div className="app">  
       <header className="app-header">  
         <div className="header-left">  
-          {(step === 'storelist' || step === 'storedetail' || step === 'select') && (  
+          {(step === 'storelist' || step === 'storedetail') && (  
             <button className="back-btn" onClick={handleBack}>←</button>  
           )}  
           <div>  
@@ -155,30 +131,10 @@ function App() {
             {headerSub() && <span className="file-name">{headerSub()}</span>}  
           </div>  
         </div>  
-  
-        {/* 관리자 모드 토글 + 업데이트 버튼 */}  
-        {(step === 'select' || step === 'storelist') && (  
-          <div className="header-right">  
-            {isAdmin ? (  
-              <label className="header-upload-btn" title="RAW 파일 업로드 (미리보기용)">  
-                📁  
-                <input type="file" accept=".xlsx,.xls"  
-                  onChange={(e) => e.target.files[0] && parseFile(e.target.files[0])}  
-                  style={{ display: 'none' }} />  
-              </label>  
-            ) : (  
-              <button  
-                className="header-upload-btn"  
-                onClick={() => setIsAdmin(true)}  
-                title="관리자 모드"  
-              >⚙️</button>  
-            )}  
-          </div>  
-        )}  
       </header>  
   
       <main className="app-main">  
-        {/* 로딩 화면 */}  
+        {/* 초기 로딩 */}  
         {step === 'loading' && (  
           <div className="loading-screen">  
             <div className="loading-inner">  
@@ -186,43 +142,53 @@ function App() {
               <h2>필수취급 대시보드</h2>  
               <div className="spinner" style={{ margin: '20px auto 0' }} />  
               <p style={{ marginTop: 12, color: '#888', fontSize: 14 }}>  
-                데이터 불러오는 중...  
+                불러오는 중...  
               </p>  
             </div>  
           </div>  
         )}  
   
-        {step === 'upload' && (  
-          <FileUpload  
-            onFileUpload={parseFile}  
-            isLoading={isLoading}  
-            errorMsg={parseError}  
-            onRetry={loadServerData}  
-          />  
+        {/* 에러 */}  
+        {step === 'error' && (  
+          <div className="loading-screen">  
+            <div className="loading-inner">  
+              <span style={{ fontSize: 48 }}>⚠️</span>  
+              <h2 style={{ color: '#C62828', marginTop: 8 }}>데이터 오류</h2>  
+              <p style={{ color: '#888', fontSize: 14, marginTop: 8 }}>{error}</p>  
+              <p style={{ color: '#aaa', fontSize: 12, marginTop: 8 }}>  
+                npm run convert 후 다시 배포해주세요  
+              </p>  
+            </div>  
+          </div>  
         )}  
-        {step === 'select' && appData && (  
+  
+        {/* 대리점/ASA 선택 */}  
+        {step === 'select' && meta && (  
           <SelectionScreen  
-            stores={appData.stores}  
-            sheets={appData.sheets}  
-            lastUpdate={lastUpdate}  
+            meta={meta}  
             onConfirm={handleSelectionConfirm}  
-            parseError={parseError}  
+            isLoading={isLoadingAsa}  
+            error={error}  
           />  
         )}  
-        {step === 'storelist' && appData && (  
+  
+        {/* 2차점 목록 */}  
+        {step === 'storelist' && asaData && (  
           <StoreListScreen  
-            stores={appData.stores}  
-            sheets={appData.sheets}  
+            stores={asaData.stores}  
+            sheets={asaData.sheets}  
             dealer={selection.dealer}  
             asa={selection.asa}  
             onSelectStore={handleSelectStore}  
           />  
         )}  
-        {step === 'storedetail' && selectedStore && appData && (  
+  
+        {/* 점포 SKU 상세 */}  
+        {step === 'storedetail' && selectedStore && asaData && (  
           <StoreDetail  
             store={selectedStore}  
-            skus={appData.skus}  
-            subCategories={appData.subCategoriesBySheet[selectedStore.sheet] || []}  
+            skus={asaData.skus}  
+            subCategories={asaData.subCategoriesBySheet[selectedStore.sheet] || []}  
           />  
         )}  
       </main>  
