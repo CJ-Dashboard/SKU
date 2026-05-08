@@ -1,0 +1,11 @@
+{  
+  "short_name": "취급률 대시보드",  
+  "name": "거래처 취급률 대시보드",  
+  "start_url": ".",  
+  "display": "standalone",  
+  "theme_color": "#1565C0",  
+  "background_color": "#f0f2f5",  
+  "icons": [  
+    { "src": "favicon.ico", "sizes": "64x64", "type": "image/x-icon" }  
+  ]  
+}  
