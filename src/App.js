@@ -18,9 +18,10 @@ function App() {
   const [isAdmin, setIsAdmin] = useState(false); // 관리자 모드  
   
   // ── 앱 시작 시 자동으로 서버 RAW 파일 로드 ──────────────────────  
-  useEffect(() => {  
-    loadServerData();  
-  }, []);  
+ useEffect(() => {  
+  loadServerData();  
+// eslint-disable-next-line react-hooks/exhaustive-deps  
+}, []);  
   
   const loadServerData = async () => {  
     setIsLoading(true);  
