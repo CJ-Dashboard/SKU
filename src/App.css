@@ -424,3 +424,28 @@ body {
   color: white; font-size: 18px; padding: 6px 10px;  
   border-radius: 8px; cursor: pointer;  
 }  
+/* 대리점 선택 완료 상태 */  
+.dealer-selected {  
+  display: flex; align-items: center; gap: 10px;  
+  background: #E3F2FD; border-radius: 10px;  
+  padding: 12px 14px; border: 1.5px solid #1565C0;  
+}  
+.dealer-selected-icon { font-size: 20px; }  
+.dealer-selected-name {  
+  font-size: 14px; font-weight: 700;  
+  color: #1565C0; flex: 1;  
+}  
+.dealer-selected-count {  
+  font-size: 12px; color: #888;  
+  background: white; padding: 2px 8px;  
+  border-radius: 8px;  
+}  
+  
+/* 변경 버튼 */  
+.change-btn {  
+  margin-left: auto;  
+  background: none; border: 1.5px solid #1565C0;  
+  color: #1565C0; font-size: 12px; font-weight: 600;  
+  padding: 3px 10px; border-radius: 10px; cursor: pointer;  
+}  
+

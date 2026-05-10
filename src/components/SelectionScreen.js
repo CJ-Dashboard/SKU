@@ -18,14 +18,19 @@ const SelectionScreen = ({ meta, onConfirm, isLoading, error }) => {
   const selectedAsaData = asaList.find((a) => a.asa === asa);  
   
   const handleDealerSelect = (d) => {  
-    setDealer(d);  
-    setAsa('');  
-    setDealerSearch('');  
+    // ✅ 같은 대리점 다시 클릭하면 선택 해제 (토글)  
+    if (dealer === d) {  
+      setDealer('');  
+      setAsa('');  
+    } else {  
+      setDealer(d);  
+      setAsa('');  
+      setDealerSearch('');  
+    }  
   };  
   
   const handleConfirm = () => {  
     if (!dealer || !asa || !selectedAsaData) return;  
-    // ✅ 해당 ASA의 시트별 fileName 전달  
     const sheetFiles = selectedAsaData.sheets.map((s) => ({  
       sheet:    s.sheet,  
       fileName: s.fileName,  
@@ -66,39 +71,65 @@ const SelectionScreen = ({ meta, onConfirm, isLoading, error }) => {
         <div className="step-label">  
           <span className="step-num">1</span>  
           <span>대리점 선택</span>  
-        </div>  
-        <div className="dealer-search-wrap">  
-          <input  
-            className="dealer-search-input"  
-            type="text"  
-            placeholder={`🔍 대리점명 검색... (총 ${dealerList.length}개)`}  
-            value={dealerSearch}  
-            onChange={(e) => { setDealerSearch(e.target.value); setDealer(''); setAsa(''); }}  
-          />  
-        </div>  
-        <div className="dealer-list">  
-          {filteredDealerList.length === 0 && (  
-            <p className="empty-msg" style={{ padding: '16px 0' }}>검색 결과 없음</p>  
+          {/* ✅ 선택된 경우 변경 버튼 표시 */}  
+          {dealer && (  
+            <button  
+              className="change-btn"  
+              onClick={() => { setDealer(''); setAsa(''); }}  
+            >  
+              변경  
+            </button>  
           )}  
-          {filteredDealerList.map((d) => {  
-            const dData = meta.dealers.find((x) => x.dealer === d);  
-            return (  
-              <button  
-                key={d}  
-                className={`dealer-item ${dealer === d ? 'dealer-item-active' : ''}`}  
-                onClick={() => handleDealerSelect(d)}  
-              >  
-                <span className="dealer-item-name">🏢 {d}</span>  
-                <span className="dealer-item-count">  
-                  {dData?.asas.length || 0}명  
-                </span>  
-              </button>  
-            );  
-          })}  
         </div>  
+  
+        {/* ✅ 대리점 선택 전: 검색 + 전체 목록 표시 */}  
+        {!dealer && (  
+          <>  
+            <div className="dealer-search-wrap">  
+              <input  
+                className="dealer-search-input"  
+                type="text"  
+                placeholder={`🔍 대리점명 검색... (총 ${dealerList.length}개)`}  
+                value={dealerSearch}  
+                onChange={(e) => setDealerSearch(e.target.value)}  
+              />  
+            </div>  
+            <div className="dealer-list">  
+              {filteredDealerList.length === 0 && (  
+                <p className="empty-msg" style={{ padding: '16px 0' }}>검색 결과 없음</p>  
+              )}  
+              {filteredDealerList.map((d) => {  
+                const dData = meta.dealers.find((x) => x.dealer === d);  
+                return (  
+                  <button  
+                    key={d}  
+                    className="dealer-item"  
+                    onClick={() => handleDealerSelect(d)}  
+                  >  
+                    <span className="dealer-item-name">🏢 {d}</span>  
+                    <span className="dealer-item-count">  
+                      {dData?.asas.length || 0}명  
+                    </span>  
+                  </button>  
+                );  
+              })}  
+            </div>  
+          </>  
+        )}  
+  
+        {/* ✅ 대리점 선택 후: 선택된 대리점만 표시 */}  
+        {dealer && (  
+          <div className="dealer-selected">  
+            <span className="dealer-selected-icon">🏢</span>  
+            <span className="dealer-selected-name">{dealer}</span>  
+            <span className="dealer-selected-count">  
+              {selectedDealerData?.asas.length || 0}명  
+            </span>  
+          </div>  
+        )}  
       </div>  
   
-      {/* STEP 2: ASA 선택 */}  
+      {/* STEP 2: ASA 선택 (대리점 선택 후 활성화) */}  
       <div className={`selection-card ${!dealer ? 'card-disabled' : ''}`}>  
         <div className="step-label">  
           <span className={`step-num ${!dealer ? 'step-num-disabled' : ''}`}>2</span>  
@@ -107,6 +138,7 @@ const SelectionScreen = ({ meta, onConfirm, isLoading, error }) => {
             {dealer && <span className="step-sub">— {dealer}</span>}  
           </span>  
         </div>  
+  
         {!dealer ? (  
           <p className="disabled-hint">① 먼저 대리점을 선택해 주세요</p>  
         ) : (  
@@ -123,7 +155,6 @@ const SelectionScreen = ({ meta, onConfirm, isLoading, error }) => {
                     <div className="asa-name">{a.asa}</div>  
                     <div className="asa-store-count">  
                       {a.totalStores}개 2차점  
-                      {/* 시트별 뱃지 */}  
                       {a.sheets.map((s) => (  
                         <span key={s.sheet} style={{  
                           fontSize: 10, fontWeight: 600,  
