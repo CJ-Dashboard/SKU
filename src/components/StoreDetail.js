@@ -9,19 +9,31 @@ const criterionColor = (c) => {
 };  
 const SHEET_ICONS = { '상온': '🌡️', '저온': '❄️' };  
   
+// ✅ 식품/장류 → 식품으로 통합  
+const normalizeCategoryName = (cat) => {  
+  const v = String(cat || '').trim();  
+  if (v === '식품' || v === '장류') return '식품';  
+  return v;  
+};  
+  
 const StoreDetail = ({ store, skus, subCategories }) => {  
   const [subCatFilter,   setSubCatFilter] = useState('전체');  
   const [critFilter,     setCritFilter] = useState('전체');  
   const [statusFilter,   setStatusFilter] = useState('전체');  
   const [skuSearch,      setSkuSearch] = useState('');  
   
+  // ✅ subCategories도 식품/장류 통합  
+  const normalizedSubCategories = [...new Set(  
+    subCategories.map(normalizeCategoryName).filter(Boolean)  
+  )].sort();  
+  
   // 전체 필수SKU  
   const allDetail = getStoreSkuDetail(store, skus, '전체');  
   
-  // 카테고리 필터 적용된 목록  
-  const catDetail = getStoreSkuDetail(store, skus, subCatFilter);  
+  // 카테고리 필터 적용  
+  const catDetail = getStoreSkuDetail(store, skus, subCatFilter === '전체' ? '전체' : subCatFilter);  
   
-  // 해당 등급에 실제 존재하는 criterion만 (동적)  
+  // 해당 등급에 실제 존재하는 criterion (동적)  
   const activeCriteria = [...new Set(allDetail.map((d) => d.criterion))]  
     .sort((a, b) =>  
       CRITERION_ORDER.indexOf(a) - CRITERION_ORDER.indexOf(b)  
@@ -29,6 +41,11 @@ const StoreDetail = ({ store, skus, subCategories }) => {
   
   // 최종 필터 적용  
   const filtered = catDetail.filter((d) => {  
+    // ✅ SKU의 category도 정규화  
+    const normalizedSkuCat = normalizeCategoryName(d.category);  
+    const normalizedFilterCat = subCatFilter === '전체' ? '전체' : normalizeCategoryName(subCatFilter);  
+  
+    if (normalizedFilterCat !== '전체' && normalizedSkuCat !== normalizedFilterCat) return false;  
     if (critFilter !== '전체' && d.criterion !== critFilter) return false;  
     if (statusFilter === '취급'   && !d.handled)               return false;  
     if (statusFilter === '미취급' &&  d.handled)               return false;  
@@ -41,17 +58,17 @@ const StoreDetail = ({ store, skus, subCategories }) => {
   const handledAll = allDetail.filter((d) => d.handled).length;  
   const totalAll = allDetail.length;  
   
-  // ✅ 제주외 제거된 subCategories 기반으로 카테고리별 요약  
-  const subCatSummary = subCategories  
-    .filter((cat) => cat !== '제주외')  
-    .map((cat) => {  
-      const catSkus = getStoreSkuDetail(store, skus, cat);  
-      const catHandled = catSkus.filter((d) => d.handled).length;  
-      const catTotal = catSkus.length;  
-      const catRate = store.catRates?.[cat] ??  
-        (catTotal > 0 ? Math.round(catHandled / catTotal * 1000) / 10 : 0);  
-      return { cat, handled: catHandled, total: catTotal, rate: catRate };  
-    });  
+  // ✅ 카테고리별 요약 (식품/장류 통합)  
+  const subCatSummary = normalizedSubCategories.map((cat) => {  
+    const catSkus = allDetail.filter((d) =>  
+      normalizeCategoryName(d.category) === cat  
+    );  
+    const catHandled = catSkus.filter((d) => d.handled).length;  
+    const catTotal = catSkus.length;  
+    const catRate = catTotal > 0  
+      ? Math.round(catHandled / catTotal * 1000) / 10 : 0;  
+    return { cat, handled: catHandled, total: catTotal, rate: catRate };  
+  });  
   
   return (  
     <div className="dashboard">  
@@ -76,7 +93,6 @@ const StoreDetail = ({ store, skus, subCategories }) => {
             <span className="info-label">지점</span>  
             <span className="info-val">  
               {store.branch}  
-              {/* ✅ 제주 지점 표시 */}  
               {store.isJeju && (  
                 <span style={{  
                   fontSize: 10, fontWeight: 700,  
@@ -112,7 +128,7 @@ const StoreDetail = ({ store, skus, subCategories }) => {
           </div>  
         </div>  
   
-        {/* 카테고리별 취급률 (동적) */}  
+        {/* 카테고리별 취급률 */}  
         {subCatSummary.length > 1 && (  
           <div className="cat-summary-row">  
             {subCatSummary.map(({ cat, handled, total, rate }) => (  
@@ -120,10 +136,10 @@ const StoreDetail = ({ store, skus, subCategories }) => {
                 key={cat}  
                 className="cat-summary-item"  
                 style={{  
-                  borderColor: subCatFilter === cat ? '#1565C0' : '#eee',  
-                  background:  subCatFilter === cat ? '#E3F2FD' : '#fff',  
+                  borderColor: normalizeCategoryName(subCatFilter) === cat ? '#1565C0' : '#eee',  
+                  background:  normalizeCategoryName(subCatFilter) === cat ? '#E3F2FD' : '#fff',  
                 }}  
-                onClick={() => setSubCatFilter(subCatFilter === cat ? '전체' : cat)}  
+                onClick={() => setSubCatFilter(normalizeCategoryName(subCatFilter) === cat ? '전체' : cat)}  
               >  
                 <span className="cat-name">{cat}</span>  
                 <span className="cat-rate" style={{ color: rateColor(rate) }}>{rate}%</span>  
@@ -136,14 +152,14 @@ const StoreDetail = ({ store, skus, subCategories }) => {
   
       {/* 필터 */}  
       <div className="card filter-bar">  
-        {/* 서브카테고리 탭 (제주외 제거됨) */}  
-        {subCategories.filter((c) => c !== '제주외').length > 1 && (  
+        {/* 카테고리 칩 */}  
+        {normalizedSubCategories.length > 1 && (  
           <div className="chip-row">  
-            {['전체', ...subCategories.filter((c) => c !== '제주외')].map((c) => (  
+            {['전체', ...normalizedSubCategories].map((c) => (  
               <button  
                 key={c}  
-                className={`chip ${subCatFilter === c ? 'chip-active' : ''}`}  
-                style={subCatFilter === c ? { background: '#1565C0' } : {}}  
+                className={`chip ${normalizeCategoryName(subCatFilter) === c ? 'chip-active' : ''}`}  
+                style={normalizeCategoryName(subCatFilter) === c ? { background: '#1565C0' } : {}}  
                 onClick={() => setSubCatFilter(c)}  
               >{c}</button>  
             ))}  
@@ -193,10 +209,9 @@ const StoreDetail = ({ store, skus, subCategories }) => {
       <div className="card">  
         <h2 className="section-title">  
           SKU 상세 ({filtered.length}개)  
-          {subCatFilter !== '전체' && (  
-            <span className="cat-badge">{subCatFilter}</span>  
+          {normalizeCategoryName(subCatFilter) !== '전체' && (  
+            <span className="cat-badge">{normalizeCategoryName(subCatFilter)}</span>  
           )}  
-          {/* ✅ 제주 지점 안내 */}  
           {store.isJeju && (  
             <span style={{  
               fontSize: 11, fontWeight: 600,  
@@ -216,7 +231,6 @@ const StoreDetail = ({ store, skus, subCategories }) => {
               <div className="sku-left">  
                 <span className="sku-status">{sku.handled ? '✅' : '❌'}</span>  
                 <div>  
-                  {/* ✅ 자재코드 앞에 표시 */}  
                   <div className="sku-name">  
                     {sku.code && (  
                       <span className="sku-code-inline">{sku.code} / </span>  
@@ -230,12 +244,17 @@ const StoreDetail = ({ store, skus, subCategories }) => {
                     >  
                       {sku.criterion}  
                     </span>  
-                    {/* ✅ 제주외 완전 제거 - category/subCat 표시 */}  
-                    {sku.category && sku.category !== '제주외' && (  
-                      <span className="cat-tag">{sku.category}</span>  
+                    {/* ✅ category를 정규화해서 표시 */}  
+                    {sku.category && normalizeCategoryName(sku.category) !== '제주외' && (  
+                      <span className="cat-tag">  
+                        {normalizeCategoryName(sku.category)}  
+                      </span>  
                     )}  
-                    {sku.subCat && sku.subCat !== '제주외' && (  
-                      <span className="sub-cat-tag">{sku.subCat}</span>  
+                    {/* ✅ subCat도 정규화해서 표시 */}  
+                    {sku.subCat && normalizeCategoryName(sku.subCat) !== '제주외' && (  
+                      <span className="sub-cat-tag">  
+                        {normalizeCategoryName(sku.subCat)}  
+                      </span>  
                     )}  
                   </div>  
                 </div>  
