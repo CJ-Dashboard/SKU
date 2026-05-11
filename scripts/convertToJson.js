@@ -12,8 +12,8 @@ const OUTPUT_DIR = path.join(__dirname, '../public/data/asa');
 const META_PATH = path.join(__dirname, '../public/data/meta.json');  
   
 const GRADE_CRITERIA = {  
-  'S+': ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  
-  'S':  ['S+/S'],  
+  'S+': ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  // 전체  
+  'S':  ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  // ✅ S+와 동일하게 전체  
   'A':  ['S+/A', 'S+/B', 'S+/C'],  
   'B':  ['S+/B', 'S+/C'],  
   'C':  ['S+/C'],  
