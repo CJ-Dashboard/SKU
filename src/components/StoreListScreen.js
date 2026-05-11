@@ -13,14 +13,17 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
   const [search, setSearch] = useState('');  
   const [sortBy, setSortBy] = useState('rate_asc');  
   
-  // 해당 ASA 점포만 필터  
+  // 해당 ASA 점포만  
   const myStores = stores.filter((s) => s.dealer === dealer && s.asa === asa);  
   
-  // 추가 필터 적용  
+  // ✅ 시트가 1개면 탭 필터 필요 없음  
+  const multiSheet = sheets.length > 1;  
+  
+  // 필터 적용  
   const filtered = myStores.filter((s) => {  
-    if (sheetFilter !== '전체' && s.sheet !== sheetFilter) return false;  
-    if (gradeFilter !== '전체' && s.grade !== gradeFilter) return false;  
-    if (search && !s.name.includes(search))               return false;  
+    if (multiSheet && sheetFilter !== '전체' && s.sheet !== sheetFilter) return false;  
+    if (gradeFilter !== '전체' && s.grade !== gradeFilter)               return false;  
+    if (search && !s.name.includes(search))                              return false;  
     return true;  
   });  
   
@@ -33,15 +36,20 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
   });  
   
   // KPI  
-  const avg = myStores.length ? Math.round(myStores.reduce((s, d) => s + d.rate, 0) / myStores.length * 10) / 10 : 0;  
+  const avg = myStores.length  
+    ? Math.round(myStores.reduce((s, d) => s + d.rate, 0) / myStores.length * 10) / 10  
+    : 0;  
   const under60  = myStores.filter((s) => s.rate < 60).length;  
   const above80  = myStores.filter((s) => s.rate >= 80).length;  
-  const gradeDist= myStores.reduce((acc, s) => { acc[s.grade] = (acc[s.grade] || 0) + 1; return acc; }, {});  
+  const gradeDist = myStores.reduce((acc, s) => {  
+    acc[s.grade] = (acc[s.grade] || 0) + 1;  
+    return acc;  
+  }, {});  
   
   return (  
     <div className="storelist-screen">  
   
-      {/* KPI 요약 */}  
+      {/* KPI 카드 */}  
       <div className="summary-cards">  
         <div className="summary-card">  
           <span className="card-icon">🏪</span>  
@@ -79,7 +87,10 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
           <span className="section-title-sm">등급 분포</span>  
           <div className="grade-chips">  
             {Object.entries(gradeDist)  
-              .sort((a, b) => ['S+','S','A','B','C'].indexOf(a[0]) - ['S+','S','A','B','C'].indexOf(b[0]))  
+              .sort((a, b) =>  
+                ['S+', 'S', 'A', 'B', 'C'].indexOf(a[0]) -  
+                ['S+', 'S', 'A', 'B', 'C'].indexOf(b[0])  
+              )  
               .map(([g, cnt]) => (  
                 <span key={g} className="grade-chip" style={{ background: gradeColor(g) }}>  
                   {g} <strong>{cnt}</strong>  
@@ -91,8 +102,9 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
   
       {/* 필터 */}  
       <div className="card filter-bar">  
-        {/* 시트 탭 */}  
-        {sheets.length > 1 && (  
+  
+        {/* ✅ 시트 탭 - 시트가 2개 이상일 때만 표시 */}  
+        {multiSheet && (  
           <div className="sheet-tabs" style={{ marginBottom: 10 }}>  
             {['전체', ...sheets].map((s) => (  
               <button  
@@ -150,7 +162,9 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
         <p className="hint-text">탭하면 SKU 취급 현황 확인 →</p>  
   
         <div className="store-list">  
-          {sorted.length === 0 && <p className="empty-msg">조건에 맞는 2차점 없음</p>}  
+          {sorted.length === 0 && (  
+            <p className="empty-msg">조건에 맞는 2차점 없음</p>  
+          )}  
           {sorted.map((store, i) => (  
             <div key={i} className="store-row" onClick={() => onSelectStore(store)}>  
               <div className="store-row-left">  
@@ -160,15 +174,18 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
                 <div>  
                   <div className="store-name">{store.name}</div>  
                   <div className="store-sub">  
-                    {store.storeCode && <span>{store.storeCode} · </span>}  
-                    <span style={{  
-                      fontSize: 10, fontWeight: 600,  
-                      background: store.sheet === '상온' ? '#FFF3E0' : '#E3F2FD',  
-                      color:      store.sheet === '상온' ? '#E65100' : '#1565C0',  
-                      padding: '1px 5px', borderRadius: 6, marginRight: 3,  
-                    }}>  
-                      {SHEET_ICONS[store.sheet] || '📄'} {store.sheet}  
-                    </span>  
+                    {store.storeCode && <span>{store.storeCode}</span>}  
+                    {/* ✅ 시트가 2개 이상일 때만 상온/저온 뱃지 표시 */}  
+                    {multiSheet && (  
+                      <span style={{  
+                        fontSize: 10, fontWeight: 600,  
+                        background: store.sheet === '상온' ? '#FFF3E0' : '#E3F2FD',  
+                        color:      store.sheet === '상온' ? '#E65100' : '#1565C0',  
+                        padding: '1px 5px', borderRadius: 6, marginLeft: 4,  
+                      }}>  
+                        {SHEET_ICONS[store.sheet] || '📄'} {store.sheet}  
+                      </span>  
+                    )}  
                   </div>  
                 </div>  
               </div>  
@@ -177,7 +194,6 @@ const StoreListScreen = ({ stores, sheets, dealer, asa, onSelectStore }) => {
                   <div className="store-rate" style={{ color: rateColor(store.rate) }}>  
                     {store.rate}%  
                   </div>  
-                  {/* ✅ RAW 기준 가동SKU / 필수SKU 표시 */}  
                   <div className="store-rate-sub">  
                     {store.handledTotal}/{store.requiredTotal}  
                   </div>  
