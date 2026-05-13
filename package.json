@@ -7,6 +7,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^13.5.0",
+    "@vercel/analytics": "^2.0.1",
     "papaparse": "^5.5.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
@@ -15,13 +16,13 @@
     "web-vitals": "^2.1.4",
     "xlsx": "^0.18.5"
   },
-  "scripts": {  
-  "start": "react-scripts start",  
-  "build": "DISABLE_ESLINT_PLUGIN=true react-scripts build",  
-  "test": "react-scripts test",  
-  "eject": "react-scripts eject",  
-  "convert": "node scripts/convertToJson.js"  
-},  
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "DISABLE_ESLINT_PLUGIN=true react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject",
+    "convert": "node scripts/convertToJson.js"
+  },
   "eslintConfig": {
     "extends": [
       "react-app",
