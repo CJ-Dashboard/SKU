@@ -55,11 +55,16 @@ const findHeaderRowIdx = (raw2d) => {
   for (let r = 0; r < Math.min(raw2d.length, 40); r++) {  
     const row = raw2d[r] || [];  
     const hasGrade = row.some((c) => String(c || '').trim() === '등급');  
-    const hasCriteria = row.some((c) => /^S\+\//.test(String(c || '').trim()));  
-    if (hasGrade && hasCriteria) return r;  
+    const hasMaping = row.some((c) =>   
+      String(c || '').trim() === '멥핑' ||   
+      String(c || '').trim() === '맵핑' ||  
+      String(c || '').trim() === '매핑'  
+    );  
+    // ✅ 등급 + 멥핑 둘 다 있는 행을 헤더로 탐지  
+    if (hasGrade && hasMaping) return r;  
   }  
   return -1;  
-};  
+};   
   
 const buildColMap = (headerRow) => {  
   const map = {};  
