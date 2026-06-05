@@ -1,13 +1,14 @@
 /**  
  * XLSX → JSON 변환 스크립트  
- * 식품 시트: 식품/장류 → 모두 "식품"으로 통합  
+ * [2026-05-31 수정] 신규 RAW 파일 대응  
+ * - S+/ 컬럼이 col[96]부터 시작 (기존 col[10]에서 이동)  
+ * - col[10~95]: CAT별 집계 구간 (식품/장류 등급, 가동SKU, 필수SKU 등)  
  */  
   
 const XLSX = require('xlsx');  
 const fs = require('fs');  
 const path = require('path');  
   
-// ✅ public/data/ 폴더에서 xlsx 파일 자동 탐지  
 const DATA_DIR = path.join(__dirname, '../public/data');  
 const xlsxFiles = fs.readdirSync(DATA_DIR).filter((f) => f.endsWith('.xlsx'));  
   
@@ -20,12 +21,10 @@ if (xlsxFiles.length > 1) {
   console.warn(` → 가장 최신 파일을 사용합니다.`);  
 }  
   
-// 여러 개면 파일명 내림차순 정렬 (날짜가 앞에 있으면 최신순)  
 const XLSX_FILE = xlsxFiles.sort().reverse()[0];  
 const XLSX_PATH = path.join(DATA_DIR, XLSX_FILE);  
 console.log(`📂 사용 파일: ${XLSX_FILE}`);  
   
-// ✅ 파일명에서 날짜 자동 추출 (YYYYMMDD 패턴)  
 const dateMatch = XLSX_FILE.match(/(\d{4})(\d{2})(\d{2})/);  
 const lastUpdate = dateMatch  
   ? {  
@@ -39,39 +38,64 @@ const lastUpdate = dateMatch
       updatedBy: '이동현',  
     };  
   
-console.log(`📅 업데이트 날짜: ${lastUpdate.date}`);    
+console.log(`📅 업데이트 날짜: ${lastUpdate.date}`);  
+  
 const OUTPUT_DIR = path.join(__dirname, '../public/data/asa');  
 const META_PATH = path.join(__dirname, '../public/data/meta.json');  
   
 const GRADE_CRITERIA = {  
-  'S+': ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  // 전체  
-  'S':  ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  // ✅ S+와 동일하게 전체  
+  'S+': ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  
+  'S':  ['S+/S', 'S+/A', 'S+/B', 'S+/C'],  
   'A':  ['S+/A', 'S+/B', 'S+/C'],  
   'B':  ['S+/B', 'S+/C'],  
   'C':  ['S+/C'],  
 };  
   
+// ✅ [수정1] 헤더행 탐지  
+// - row[0]==='등급' && row[1]==='멥핑' 조건으로 Row18 확정  
+// - Row13은 col[0]=None이라 자동 skip됨  
 const findHeaderRowIdx = (raw2d) => {  
+  const MAPPING_NAMES = ['멥핑', '맵핑', '매핑'];  
+  const KNOWN_HEADERS = ['SU', '지점', '코드', '대리점명', 'SA', '2차점코드', '2차점명', 'ASA'];  
+  
   for (let r = 0; r < Math.min(raw2d.length, 40); r++) {  
     const row = raw2d[r] || [];  
-    const hasGrade = row.some((c) => String(c || '').trim() === '등급');  
-    const hasMaping = row.some((c) =>   
-      String(c || '').trim() === '멥핑' ||   
-      String(c || '').trim() === '맵핑' ||  
-      String(c || '').trim() === '매핑'  
-    );  
-    // ✅ 등급 + 멥핑 둘 다 있는 행을 헤더로 탐지  
-    if (hasGrade && hasMaping) return r;  
+    const col0 = String(row[0] == null ? '' : row[0]).trim();  
+    const col1 = String(row[1] == null ? '' : row[1]).trim();  
+  
+    // 1순위: 등급 + 멥핑 → Row18 확정 탐지  
+    if (col0 === '등급' && MAPPING_NAMES.includes(col1)) return r;  
+  
+    // 폴백: 등급이 col[0]에 있고 앞 15개 컬럼에서 주요 헤더 5개 이상 매칭  
+    if (col0 === '등급') {  
+      const front15    = Array.from({ length: 15 }, (_, i) => String(row[i] == null ? '' : row[i]).trim());  
+      const matchCount = KNOWN_HEADERS.filter((k) => front15.includes(k)).length;  
+      if (matchCount >= 5) return r;  
+    }  
   }  
   return -1;  
-};   
+};  
   
+// ✅ [수정2] SKU 컬럼 탐색  
+// - Object.entries()로 sparse array 구멍 없이 전체 순회  
+// - col[96~279]의 S+/ 컬럼도 빠짐없이 탐지  
+const findSkuCols = (headerRow) => {  
+  const result = [];  
+  Object.entries(headerRow).forEach(([idx, cell]) => {  
+    const v = String(cell == null ? '' : cell).trim();  
+    if (v.startsWith('S+/')) result.push(Number(idx));  
+  });  
+  return result;  
+};  
+  
+// ✅ [수정3] buildColMap도 Object.entries()로 안전하게  
 const buildColMap = (headerRow) => {  
   const map = {};  
-  headerRow.forEach((cell, idx) => {  
-    const v = String(cell || '').trim();  
+  Object.entries(headerRow).forEach(([i, cell]) => {  
+    const idx = Number(i);  
+    const v = String(cell == null ? '' : cell).trim();  
     if (v === '등급')                                          map.GRADE = idx;  
-    else if (v === '멥핑' || v === '맵핑' || v === '매핑')         map.MAPPING = idx;  
+    else if (['멥핑', '맵핑', '매핑'].includes(v))                  map.MAPPING = idx;  
     else if (v === 'SU')                                            map.SU = idx;  
     else if (v.includes('지점'))                                    map.BRANCH = idx;  
     else if (v === '코드')                                          map.CODE = idx;  
@@ -84,27 +108,11 @@ const buildColMap = (headerRow) => {
   return map;  
 };  
   
-const findSkuCols = (headerRow) =>  
-  headerRow.reduce((acc, cell, idx) => {  
-    if (/^S\+\//.test(String(cell || '').trim())) acc.push(idx);  
-    return acc;  
-  }, []);  
-  
 const isJejuBranch = (branch) => String(branch || '').trim().includes('제주');  
-  
-// ✅ 제주외 → 신선 변환  
-const convertJejuLabel = (val) => {  
-  const v = String(val || '').trim();  
-  return v === '제주외' ? '신선' : v;  
-};  
-  
-// ✅ 식품/장류 → 식품으로 통합  
+const convertJejuLabel = (val)    => String(val || '').trim() === '제주외' ? '신선' : String(val || '').trim();  
 const convertFoodCategory = (val, sheetName) => {  
   const v = String(val || '').trim();  
-  // 식품 시트에서만 식품/장류 통합  
-  if (sheetName.includes('식품')) {  
-    if (v === '식품' || v === '장류') return '식품';  
-  }  
+  if (sheetName.includes('식품') && (v === '식품' || v === '장류')) return '식품';  
   return v;  
 };  
   
@@ -112,11 +120,19 @@ const parseSheet = (raw2d, sheetName) => {
   const headerRowIdx = findHeaderRowIdx(raw2d);  
   if (headerRowIdx === -1) throw new Error(`헤더행 없음: ${sheetName}`);  
   
+  console.log(` → 헤더행 위치: Row ${headerRowIdx + 1} (0-indexed: ${headerRowIdx})`);  
+  
   const headerRow = raw2d[headerRowIdx] || [];  
   const colMap = buildColMap(headerRow);  
   const skuCols = findSkuCols(headerRow);  
+  
+  console.log(` → GRADE col: ${colMap.GRADE}, ASA col: ${colMap.ASA}`);  
+  console.log(` → SKU 컬럼 수: ${skuCols.length}, 시작: ${skuCols[0]}, 끝: ${skuCols[skuCols.length - 1]}`);  
+  
   if (skuCols.length === 0) throw new Error(`SKU 컬럼 없음: ${sheetName}`);  
   
+  // 헤더 기준 상대 위치 row (구조 확인됨)  
+  // headerRowIdx=17 기준: brandRow=12, catRow=13, nameRow=14, subCatRow=15, codeRow=16  
   const brandRow = raw2d[headerRowIdx - 5] || [];  
   const catRow = raw2d[headerRowIdx - 4] || [];  
   const nameRow = raw2d[headerRowIdx - 3] || [];  
@@ -125,37 +141,34 @@ const parseSheet = (raw2d, sheetName) => {
   const jejuRowIdx = headerRowIdx - 14;  
   const jejuRow = jejuRowIdx >= 0 ? (raw2d[jejuRowIdx] || []) : [];  
   
-  // ✅ SKU 메타데이터 (카테고리 통합 처리)  
-  const skus = skuCols.map((col, idx) => {  
-    const rawCategory = catRow[col];  
-    const rawSubCat = subCatRow[col];  
+  const skus = skuCols.map((col, idx) => ({  
+    idx,  
+    col,  
+    sheet:        sheetName,  
+    criterion:    String(headerRow[col] == null ? '' : headerRow[col]).trim(),  
+    brand:        String(brandRow[col] == null ? '' : brandRow[col]).trim(),  
+    category:     convertFoodCategory(convertJejuLabel(catRow[col]),    sheetName),  
+    name:         String(nameRow[col] == null ? '' : nameRow[col]).trim(),  
+    subCat:       convertFoodCategory(convertJejuLabel(subCatRow[col]), sheetName),  
+    code:         String(codeRow[col] == null ? '' : codeRow[col]).trim(),  
+    jejuExcluded: String(jejuRow[col] == null ? '' : jejuRow[col]).trim() === '제외',  
+  }));  
   
-    return {  
-      idx,  
-      col,  
-      sheet:        sheetName,  
-      criterion:    String(headerRow[col] || '').trim(),  
-      brand:        String(brandRow[col] || '').trim(),  
-      // ✅ 식품/장류 → 식품으로 통합 + 제주외 → 신선  
-      category:     convertFoodCategory(convertJejuLabel(rawCategory), sheetName),  
-      name:         String(nameRow[col] || '').trim(),  
-      subCat:       convertFoodCategory(convertJejuLabel(rawSubCat), sheetName),  
-      code:         String(codeRow[col] || '').trim(),  
-      jejuExcluded: String(jejuRow[col] || '').trim() === '제외',  
-    };  
-  });  
-  
-  // ✅ 중복 제거 (식품/장류 통합으로 중복 생김)  
   const subCategories = [...new Set(  
     skus.map((s) => s.category).filter((c) => Boolean(c) && c !== '제주외')  
   )].sort();  
   
+  // 가동/필수 컬럼은 Row14(nameRow)에 있음  
+  // col[12]=가동SKU, col[40]=필수SKU → 기본값 12, 40이 이미 정확함  
   let col12Idx = 12, col40Idx = 40;  
-  headerRow.forEach((cell, idx) => {  
-    const v = String(cell || '').trim();  
-    if (v.includes('가동')) col12Idx = idx;  
-    if (v.includes('필수')) col40Idx = idx;  
+  Object.entries(nameRow).forEach(([i, cell]) => {  
+    const v = String(cell == null ? '' : cell).trim();  
+    const idx = Number(i);  
+    if (v.includes('가동') && v.includes('SKU')) col12Idx = idx;  
+    if (v.includes('필수') && v.includes('SKU')) col40Idx = idx;  
   });  
+  
+  console.log(` → 가동SKU col: ${col12Idx}, 필수SKU col: ${col40Idx}`);  
   
   const VALID_GRADES = new Set(Object.keys(GRADE_CRITERIA));  
   const stores = [];  
@@ -164,13 +177,13 @@ const parseSheet = (raw2d, sheetName) => {
     const row = raw2d[r];  
     if (!row) continue;  
   
-    const grade = String(row[colMap.GRADE] ?? '').trim();  
-    const storeName = String(row[colMap.STORE_NAME] ?? '').trim();  
+    const grade = String(row[colMap.GRADE] == null ? '' : row[colMap.GRADE]).trim();  
+    const storeName = String(row[colMap.STORE_NAME] == null ? '' : row[colMap.STORE_NAME]).trim();  
     if (!VALID_GRADES.has(grade) || !storeName) continue;  
   
-    const dealer = String(row[colMap.DEALER] ?? '').trim();  
-    const asa = String(row[colMap.ASA] ?? '').trim();  
-    const branch = String(row[colMap.BRANCH] ?? '').trim();  
+    const dealer = String(row[colMap.DEALER] == null ? '' : row[colMap.DEALER]).trim();  
+    const asa = String(row[colMap.ASA] == null ? '' : row[colMap.ASA]).trim();  
+    const branch = String(row[colMap.BRANCH] == null ? '' : row[colMap.BRANCH]).trim();  
     const jeju = isJejuBranch(branch);  
   
     const handling = {};  
@@ -180,7 +193,7 @@ const parseSheet = (raw2d, sheetName) => {
         v === 1 || v === '1'              ? 1   :  
         v === 0 || v === '0'              ? 0   :  
         v === 3 || v === '3'              ? 3   :  
-        String(v ?? '').trim() === '제외' ? 'X' : null;  
+        String(v == null ? '' : v).trim() === '제외' ? 'X' : null;  
     });  
   
     let rate, handledTotal, requiredTotal;  
@@ -192,15 +205,10 @@ const parseSheet = (raw2d, sheetName) => {
       requiredTotal = rawRequired;  
     } else {  
       const requiredCriteria = GRADE_CRITERIA[grade] || [];  
-      const applicableSkus = skus.filter((s) =>  
-        requiredCriteria.includes(s.criterion) && !s.jejuExcluded  
-      );  
-      const applicable = applicableSkus.filter((s) =>  
-        handling[s.idx] === 0 || handling[s.idx] === 1  
-      );  
+      const applicableSkus = skus.filter((s) => requiredCriteria.includes(s.criterion) && !s.jejuExcluded);  
+      const applicable = applicableSkus.filter((s) => handling[s.idx] === 0 || handling[s.idx] === 1);  
       const handled = applicable.filter((s) => handling[s.idx] === 1);  
-      rate = applicable.length > 0  
-        ? Math.round(handled.length / applicable.length * 1000) / 10 : 0;  
+      rate = applicable.length > 0 ? Math.round(handled.length / applicable.length * 1000) / 10 : 0;  
       handledTotal = handled.length;  
       requiredTotal = applicable.length;  
     }  
@@ -208,27 +216,22 @@ const parseSheet = (raw2d, sheetName) => {
     const reqCritForCat = GRADE_CRITERIA[grade] || [];  
     const catRates = {};  
     subCategories.forEach((cat) => {  
-      const catReq = skus.filter((s) =>  
-        reqCritForCat.includes(s.criterion) &&  
-        s.category === cat &&  
-        (!jeju || !s.jejuExcluded)  
-      );  
+      const catReq = skus.filter((s) => reqCritForCat.includes(s.criterion) && s.category === cat && (!jeju || !s.jejuExcluded));  
       const catApp = catReq.filter((s) => handling[s.idx] === 0 || handling[s.idx] === 1);  
       const catHand = catApp.filter((s) => handling[s.idx] === 1);  
-      catRates[cat] = catApp.length > 0  
-        ? Math.round(catHand.length / catApp.length * 1000) / 10 : null;  
+      catRates[cat] = catApp.length > 0 ? Math.round(catHand.length / catApp.length * 1000) / 10 : null;  
     });  
   
     stores.push({  
       row: r,  
       sheet: sheetName,  
       grade,  
-      su:        String(row[colMap.SU] ?? '').trim(),  
+      su:        String(row[colMap.SU] == null ? '' : row[colMap.SU]).trim(),  
       branch,  
-      code:      String(row[colMap.CODE] ?? '').trim(),  
+      code:      String(row[colMap.CODE] == null ? '' : row[colMap.CODE]).trim(),  
       dealer,  
-      sa:        String(row[colMap.SA] ?? '').trim(),  
-      storeCode: String(row[colMap.STORE_CODE] ?? '').trim(),  
+      sa:        String(row[colMap.SA] == null ? '' : row[colMap.SA]).trim(),  
+      storeCode: String(row[colMap.STORE_CODE] == null ? '' : row[colMap.STORE_CODE]).trim(),  
       name:      storeName,  
       asa,  
       isJeju: jeju,  
@@ -243,7 +246,7 @@ const parseSheet = (raw2d, sheetName) => {
   return { stores, skus, subCategories };  
 };  
   
-// ── 메인 실행 ────────────────────────────────────────────────────  
+// ── 메인 실행 ──────────────────────────────────────────────  
 const main = () => {  
   console.log('📊 XLSX → JSON 변환 시작...');  
   
@@ -251,14 +254,11 @@ const main = () => {
     console.error(`❌ 파일 없음: ${XLSX_PATH}`);  
     process.exit(1);  
   }  
-  
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });  
   
   const wb = XLSX.readFile(XLSX_PATH);  
-  
   const metaDealers = {};  
-  let totalStores = 0;  
-  let totalAsa = 0;  
+  let totalStores = 0, totalAsa = 0;  
   
   wb.SheetNames.forEach((sheetName) => {  
     try {  
@@ -272,38 +272,22 @@ const main = () => {
       stores.forEach((store) => {  
         const key = `${sheetName}__${store.dealer}__${store.asa}`;  
         if (!asaGroups[key]) {  
-          asaGroups[key] = {  
-            sheet: sheetName,  
-            dealer: store.dealer,  
-            asa: store.asa,  
-            stores: [],  
-            skus,  
-            subCategories,  
-          };  
+          asaGroups[key] = { sheet: sheetName, dealer: store.dealer, asa: store.asa, stores: [], skus, subCategories };  
         }  
         asaGroups[key].stores.push(store);  
       });  
   
-      Object.entries(asaGroups).forEach(([key, data]) => {  
+      Object.entries(asaGroups).forEach(([, data]) => {  
         const fileName = `${sheetName}_${data.dealer}_${data.asa}.json`;  
-        const filePath = path.join(OUTPUT_DIR, fileName);  
-        fs.writeFileSync(filePath, JSON.stringify(data), 'utf8');  
+        fs.writeFileSync(path.join(OUTPUT_DIR, fileName), JSON.stringify(data), 'utf8');  
   
         const avgRate = data.stores.length  
           ? Math.round(data.stores.reduce((s, d) => s + d.rate, 0) / data.stores.length * 10) / 10  
           : 0;  
   
         if (!metaDealers[data.dealer]) metaDealers[data.dealer] = {};  
-        if (!metaDealers[data.dealer][data.asa]) {  
-          metaDealers[data.dealer][data.asa] = [];  
-          totalAsa++;  
-        }  
-        metaDealers[data.dealer][data.asa].push({  
-          sheet: sheetName,  
-          storeCount: data.stores.length,  
-          avgRate,  
-          fileName,  
-        });  
+        if (!metaDealers[data.dealer][data.asa]) { metaDealers[data.dealer][data.asa] = []; totalAsa++; }  
+        metaDealers[data.dealer][data.asa].push({ sheet: sheetName, storeCount: data.stores.length, avgRate, fileName });  
         totalStores += data.stores.length;  
       });  
   
@@ -314,23 +298,19 @@ const main = () => {
   
   const meta = {  
     sheets: wb.SheetNames,  
+    lastUpdate,  
     dealers: Object.entries(metaDealers).map(([dealer, asas]) => ({  
       dealer,  
       asas: Object.entries(asas).map(([asa, sheets]) => ({  
         asa,  
         sheets,  
         totalStores: sheets.reduce((s, d) => s + d.storeCount, 0),  
-        avgRate: Math.round(  
-          sheets.reduce((s, d) => s + d.avgRate, 0) / sheets.length * 10  
-        ) / 10,  
+        avgRate: Math.round(sheets.reduce((s, d) => s + d.avgRate, 0) / sheets.length * 10) / 10,  
       })),  
     })),  
   };  
   
- // ✅ 파일명에서 추출한 날짜 자동 반영  
-meta.lastUpdate = lastUpdate;  
-  
-fs.writeFileSync(META_PATH, JSON.stringify(meta), 'utf8');  
+  fs.writeFileSync(META_PATH, JSON.stringify(meta), 'utf8');  
   
   console.log(`\n✅ 변환 완료!`);  
   console.log(` - 대리점: ${Object.keys(metaDealers).length}개`);  
